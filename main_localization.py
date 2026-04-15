@@ -57,6 +57,9 @@ DEBUG_MODE = 1   # 1=각 단계 시각화 팝업 ON,   0=OFF
 TOP_K = 2        # Top-K DB 이미지 검색 수 (클수록 후보 많아지나 속도 저하)
 
 # ── Fine Matching (LoFTR) ─────────────────────────────────────
+LOFTR_WEIGHTS        = "outdoor" # 사전학습 가중치: "outdoor" | "indoor"
+                               #   outdoor: MegaDepth 학습 (야외 랜드마크, 원거리, 스케일 변화 강인)
+                               #   indoor : ScanNet 학습  (실내 RGB-D, 단거리, 조명 안정)
 LOFTR_RESIZE_LONG    = 640   # LoFTR 입력 긴 변 해상도 (8의 배수)
                                #   640  : 빠름, 저해상도 (기본값)
                                #   832  : 중간
@@ -84,7 +87,7 @@ KD_RADIUS_PX = 5.0            # KD-Tree 탐색 반경 (픽셀)
                                #   작을수록 엄격한 매칭, 클수록 더 많은 후보 허용
 
 # ── PnP RANSAC ────────────────────────────────────────────────
-RANSAC_REPROJ = 5.0           # 재투영 오차 임계값 (픽셀): 이 이하만 inlier
+RANSAC_REPROJ = 10.0           # 재투영 오차 임계값 (픽셀): 이 이하만 inlier
                                #   작을수록 엄격, 클수록 inlier 수 증가
 RANSAC_ITER   = 1000          # RANSAC 최대 반복 횟수 (클수록 정확하나 느림)
 
@@ -124,7 +127,8 @@ def localize(query_path: str,
     # ── 모듈 초기화 ───────────────────────────────
     print("\n[Pipeline] 모듈 초기화...")
     retriever = CoarseRetriever(dino_pt_path=DINO_PT_PATH)
-    matcher   = FineMatcher(conf_thr=LOFTR_CONF_THRESHOLD,
+    matcher   = FineMatcher(weights=LOFTR_WEIGHTS,
+                            conf_thr=LOFTR_CONF_THRESHOLD,
                             resize_long=LOFTR_RESIZE_LONG)
     estimator = PoseEstimator(sfm_db_path=SFM_DB_PATH)
 
@@ -171,11 +175,16 @@ def localize(query_path: str,
             print(f"[평가] 위치 오차: {eval_result['trans_err']:.4f}  (COLMAP world units)")
             print(f"[평가] 회전 오차: {eval_result['rot_err']:.2f} °")
 
-            all_centers = estimator.get_all_camera_centers()
-            inlier_3d   = best_pose["kd_pts_3d"][best_pose["inliers"]]
-            from visualizer import save_result_ply
-            save_result_ply(estimator.points3d, all_centers, eval_result,
-                            inlier_pts_3d=inlier_3d)
+        # PLY는 GT 유무와 무관하게 항상 저장
+        import cv2
+        R_est, _ = cv2.Rodrigues(best_pose["rvec"])
+        est_center  = -R_est.T @ best_pose["tvec"].flatten()
+        all_centers = estimator.get_all_camera_centers()
+        inlier_3d   = best_pose["kd_pts_3d"][best_pose["inliers"]]
+        from visualizer import save_result_ply
+        save_result_ply(estimator.points3d, all_centers, eval_result,
+                        inlier_pts_3d=inlier_3d,
+                        est_camera_center=est_center)
 
     # ── 결과 요약 ─────────────────────────────────
     if debug_mode:

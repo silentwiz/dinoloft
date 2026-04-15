@@ -204,8 +204,9 @@ def _sphere_cluster(center: np.ndarray, color: tuple,
 
 def save_result_ply(points3d: dict,
                     all_cam_centers: list,
-                    eval_result: dict,
+                    eval_result: dict | None,
                     inlier_pts_3d: np.ndarray | None = None,
+                    est_camera_center: np.ndarray | None = None,
                     output_path: str = "./sfm_output/result_pose.ply") -> None:
     """
     3D 포인트 클라우드 + DB 카메라 위치 + GT/추정 카메라 위치를 PLY로 저장.
@@ -213,16 +214,17 @@ def save_result_ply(points3d: dict,
     색상 코드:
       - 3D 포인트        : 원본 RGB
       - DB 카메라 (전체) : 회색 (150, 150, 150)
-      - GT 카메라        : 초록 (0, 255, 0) — 구형 클러스터
+      - GT 카메라        : 초록 (0, 255, 0) — 구형 클러스터 (GT 있을 때만)
       - 추정 카메라      : 빨강 (255, 50, 50) — 구형 클러스터
       - PnP inlier 3D 점 : 노란색 (255, 220, 0)
 
     Args:
-        points3d       : sfm_db["points3d"] = {id: {"xyz", "rgb"}}
-        all_cam_centers: estimator.get_all_camera_centers() 결과
-        eval_result    : estimator.evaluate() 결과 (C_gt, C_est 포함)
-        inlier_pts_3d  : PnP RANSAC inlier 3D 좌표 [K, 3] (없으면 None)
-        output_path    : 저장 경로
+        points3d          : sfm_db["points3d"] = {id: {"xyz", "rgb"}}
+        all_cam_centers   : estimator.get_all_camera_centers() 결과
+        eval_result       : estimator.evaluate() 결과 (C_gt, C_est 포함). GT 없으면 None.
+        inlier_pts_3d     : PnP RANSAC inlier 3D 좌표 [K, 3] (없으면 None)
+        est_camera_center : GT 없을 때 추정 카메라 월드 위치 [3] (-R^T @ t)
+        output_path       : 저장 경로
     """
     rows = []  # (x, y, z, r, g, b)
 
@@ -236,11 +238,14 @@ def save_result_ply(points3d: dict,
     for C in all_cam_centers:
         rows.append((C[0], C[1], C[2], 150, 150, 150))
 
-    # GT 카메라 (초록 구형 클러스터)
-    rows.extend(_sphere_cluster(eval_result["C_gt"],  color=(0, 255, 0),   r=0.05))
-
-    # 추정 카메라 (빨강 구형 클러스터)
-    rows.extend(_sphere_cluster(eval_result["C_est"], color=(255, 50, 50), r=0.05))
+    if eval_result is not None:
+        # GT 카메라 (초록 구형 클러스터)
+        rows.extend(_sphere_cluster(eval_result["C_gt"],  color=(0, 255, 0),   r=0.05))
+        # 추정 카메라 (빨강 구형 클러스터)
+        rows.extend(_sphere_cluster(eval_result["C_est"], color=(255, 50, 50), r=0.05))
+    elif est_camera_center is not None:
+        # GT 없을 때: 추정 카메라만 (빨강 구형 클러스터)
+        rows.extend(_sphere_cluster(est_camera_center, color=(255, 50, 50), r=0.05))
 
     # PnP inlier 3D 점 (노란색)
     if inlier_pts_3d is not None and len(inlier_pts_3d) > 0:

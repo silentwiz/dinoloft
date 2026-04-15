@@ -43,7 +43,7 @@ except ImportError:
 # ──────────────────────────────────────────────
 # 설정값
 # ──────────────────────────────────────────────
-LOFTR_WEIGHTS  = "indoor"    # "indoor" | "outdoor"
+LOFTR_WEIGHTS  = "outdoor"   # "indoor" | "outdoor"
 CONF_THRESHOLD = 0.5         # 이 값 미만 매칭 제거
 RESIZE_LONG    = 1024        # LoFTR 입력 긴 변 기준 리사이즈 (8의 배수)
                              # 640(기본) → 1024: 4K 입력 시 세부 특징 보존 향상
