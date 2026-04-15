@@ -54,7 +54,7 @@ EVAL_MODE  = 1   # 1=GT 비교 평가 + PLY 저장,  0=생략
 DEBUG_MODE = 1   # 1=각 단계 시각화 팝업 ON,   0=OFF
 
 # ── Coarse Retrieval (DINOv2) ─────────────────────────────────
-TOP_K = 2        # Top-K DB 이미지 검색 수 (클수록 후보 많아지나 속도 저하)
+TOP_K = 1       # Top-K DB 이미지 검색 수 (클수록 후보 많아지나 속도 저하)
 
 # ── Fine Matching (LoFTR) ─────────────────────────────────────
 LOFTR_WEIGHTS        = "outdoor" # 사전학습 가중치: "outdoor" | "indoor"
@@ -103,6 +103,11 @@ QUERY_CAMERA_K = np.array([
     [   0.0,    0.0,    1.0],
 ], dtype=np.float64)
 QUERY_CAMERA_K_WH = (1920, 1440)  # K 캘리브레이션 기준 해상도 (width, height)
+
+# ── 스케일 캘리브레이션 ───────────────────────────────────────
+# MeshLab 측정: 7.70053 COLMAP units = 67.29m (Google Maps 기준)
+# → 1 COLMAP unit = 67.29 / 7.70053 ≈ 8.7384m
+COLMAP_UNIT_TO_METER = 67.29 / 7.70053   # m / COLMAP unit
 
 # ═══════════════════════════════════════════════════════════════
 
@@ -171,8 +176,9 @@ def localize(query_path: str,
         eval_result = estimator.evaluate(best_pose["rvec"], best_pose["tvec"],
                                          query_name)
         if eval_result:
+            trans_m = eval_result['trans_err'] * COLMAP_UNIT_TO_METER
             print(f"\n[평가] GT: {eval_result['gt_name']}")
-            print(f"[평가] 위치 오차: {eval_result['trans_err']:.4f}  (COLMAP world units)")
+            print(f"[평가] 위치 오차: {eval_result['trans_err']:.4f} units × {COLMAP_UNIT_TO_METER:.4f} → {trans_m:.2f} m")
             print(f"[평가] 회전 오차: {eval_result['rot_err']:.2f} °")
 
         # PLY는 GT 유무와 무관하게 항상 저장
@@ -189,7 +195,7 @@ def localize(query_path: str,
     # ── 결과 요약 ─────────────────────────────────
     if debug_mode:
         print_summary(query_path, top_k_results, match_results, best_pose,
-                      eval_result)
+                      eval_result, unit_to_meter=COLMAP_UNIT_TO_METER)
 
     if best_pose is None:
         return None
