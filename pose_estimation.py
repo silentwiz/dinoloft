@@ -591,6 +591,7 @@ class PoseEstimator:
             "num_kd"       : total,
             "num_inliers"  : len(inliers),
             "db_names"     : db_names_used,
+            "K_query"      : K_mat,   # 재투영 시각화용 실제 사용된 카메라 K
         }
 
         if debug_mode:
@@ -672,6 +673,7 @@ class PoseEstimator:
             "C_gt":      C_gt,
             "C_est":     C_est,
             "R_gt":      R_gt,
+            "R_est":     R_est,   # 시선 화살표 시각화용 추정 회전행렬
             "t_gt":      t_gt,
             "trans_err": trans_err,   # COLMAP world units (임의 스케일, 미터 아님)
             "rot_err":   rot_err,     # 도(degree)

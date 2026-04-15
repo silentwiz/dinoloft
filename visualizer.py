@@ -185,6 +185,31 @@ def show_pnp(query_path: str,
 # ──────────────────────────────────────────────
 # 4. PLY 결과 저장
 # ──────────────────────────────────────────────
+def _gaze_line(center: np.ndarray, R: np.ndarray, color: tuple,
+               length: float = 0.6, n_pts: int = 40) -> list[tuple]:
+    """
+    카메라 Z축(시선) 방향으로 점 라인 생성 — PLY에서 화살표처럼 보임.
+
+    카메라 좌표계에서 시선 = +Z = [0,0,1].
+    월드 좌표로 변환: R^T @ [0,0,1]  (R이 world-to-camera 이므로)
+
+    Args:
+        center : 카메라 월드 위치 (C = -R^T @ t)
+        R      : world-to-camera 3×3 회전 행렬
+        color  : (r, g, b) 0-255
+        length : 라인 길이 (COLMAP units)
+        n_pts  : 점 개수 (많을수록 선명)
+    """
+    gaze_dir = R.T @ np.array([0.0, 0.0, 1.0])
+    gaze_dir /= np.linalg.norm(gaze_dir)
+    pts = []
+    for i in range(n_pts):
+        t = length * i / (n_pts - 1)
+        p = center + t * gaze_dir
+        pts.append((p[0], p[1], p[2], color[0], color[1], color[2]))
+    return pts
+
+
 def _sphere_cluster(center: np.ndarray, color: tuple,
                     r: float = 0.05) -> list[tuple]:
     """
@@ -207,6 +232,7 @@ def save_result_ply(points3d: dict,
                     eval_result: dict | None,
                     inlier_pts_3d: np.ndarray | None = None,
                     est_camera_center: np.ndarray | None = None,
+                    est_R: np.ndarray | None = None,
                     output_path: str = "./sfm_output/result_pose.ply") -> None:
     """
     3D 포인트 클라우드 + DB 카메라 위치 + GT/추정 카메라 위치를 PLY로 저장.
@@ -214,16 +240,17 @@ def save_result_ply(points3d: dict,
     색상 코드:
       - 3D 포인트        : 원본 RGB
       - DB 카메라 (전체) : 회색 (150, 150, 150)
-      - GT 카메라        : 초록 (0, 255, 0) — 구형 클러스터 (GT 있을 때만)
-      - 추정 카메라      : 빨강 (255, 50, 50) — 구형 클러스터
+      - GT 카메라        : 초록 구형 클러스터 + 초록 시선 화살표 (GT 있을 때만)
+      - 추정 카메라      : 빨강 구형 클러스터 + 빨강 시선 화살표
       - PnP inlier 3D 점 : 노란색 (255, 220, 0)
 
     Args:
         points3d          : sfm_db["points3d"] = {id: {"xyz", "rgb"}}
         all_cam_centers   : estimator.get_all_camera_centers() 결과
-        eval_result       : estimator.evaluate() 결과 (C_gt, C_est 포함). GT 없으면 None.
+        eval_result       : estimator.evaluate() 결과 (C_gt, C_est, R_gt, R_est 포함). GT 없으면 None.
         inlier_pts_3d     : PnP RANSAC inlier 3D 좌표 [K, 3] (없으면 None)
         est_camera_center : GT 없을 때 추정 카메라 월드 위치 [3] (-R^T @ t)
+        est_R             : GT 없을 때 추정 회전 행렬 [3,3] (시선 화살표용)
         output_path       : 저장 경로
     """
     rows = []  # (x, y, z, r, g, b)
@@ -239,13 +266,20 @@ def save_result_ply(points3d: dict,
         rows.append((C[0], C[1], C[2], 150, 150, 150))
 
     if eval_result is not None:
-        # GT 카메라 (초록 구형 클러스터)
+        # GT 카메라 (초록 구형 클러스터 + 시선 화살표)
         rows.extend(_sphere_cluster(eval_result["C_gt"],  color=(0, 255, 0),   r=0.05))
-        # 추정 카메라 (빨강 구형 클러스터)
+        rows.extend(_gaze_line(eval_result["C_gt"],  eval_result["R_gt"],
+                               color=(0, 220, 0)))
+        # 추정 카메라 (빨강 구형 클러스터 + 시선 화살표)
         rows.extend(_sphere_cluster(eval_result["C_est"], color=(255, 50, 50), r=0.05))
+        if "R_est" in eval_result:
+            rows.extend(_gaze_line(eval_result["C_est"], eval_result["R_est"],
+                                   color=(255, 50, 50)))
     elif est_camera_center is not None:
-        # GT 없을 때: 추정 카메라만 (빨강 구형 클러스터)
+        # GT 없을 때: 추정 카메라만 (빨강 구형 클러스터 + 시선 화살표)
         rows.extend(_sphere_cluster(est_camera_center, color=(255, 50, 50), r=0.05))
+        if est_R is not None:
+            rows.extend(_gaze_line(est_camera_center, est_R, color=(255, 50, 50)))
 
     # PnP inlier 3D 점 (노란색)
     if inlier_pts_3d is not None and len(inlier_pts_3d) > 0:
@@ -272,6 +306,76 @@ def save_result_ply(points3d: dict,
                     f"{row[3]} {row[4]} {row[5]}\n")
 
     print(f"[PLY] 저장 완료: {output_path}  ({len(rows)}개 점)")
+
+
+# ──────────────────────────────────────────────
+# 6. 재투영 오차 시각화
+# ──────────────────────────────────────────────
+def save_reprojection_png(query_path: str,
+                          rvec: np.ndarray,
+                          tvec: np.ndarray,
+                          K: np.ndarray,
+                          pts2d_inlier: np.ndarray,
+                          pts3d_inlier: np.ndarray,
+                          output_path: str = "./sfm_output/reprojection.png") -> None:
+    """
+    추정 포즈로 3D 점을 쿼리 이미지에 재투영해 LoFTR 원래 점과 비교 저장.
+
+    색상 코드:
+      - 초록 원  : LoFTR inlier 2D 점 (실제 픽셀 위치)
+      - 빨강 점  : 추정 포즈로 재투영한 3D→2D 점
+      - 노란 선  : 두 점을 이은 오차 벡터 (길수록 오차 큼)
+
+    회전이 맞으면 초록/빨강이 거의 겹침.
+    오차 방향이 일정하면 → 시선(회전) 오류 패턴 파악 가능.
+
+    Args:
+        query_path   : 쿼리 이미지 경로
+        rvec         : PnP 추정 rvec [3,1]
+        tvec         : PnP 추정 tvec [3,1]
+        K            : 실제 사용된 카메라 내부 파라미터 [3,3]
+        pts2d_inlier : RANSAC inlier 2D 점 [N, 2] (PnP와 동일 좌표계)
+        pts3d_inlier : RANSAC inlier 3D 점 [N, 3]
+        output_path  : 저장 경로 (.png)
+    """
+    import cv2
+
+    img = np.array(ImageOps.exif_transpose(Image.open(query_path)).convert("RGB"))
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    # 3D → 2D 재투영
+    if len(pts3d_inlier) == 0:
+        print("[재투영] inlier 점이 없어 저장 생략")
+        return
+
+    proj, _ = cv2.projectPoints(
+        pts3d_inlier.astype(np.float64),
+        rvec, tvec, K, None
+    )
+    proj = proj.reshape(-1, 2)
+
+    for orig, rep in zip(pts2d_inlier, proj):
+        ox, oy = int(round(orig[0])), int(round(orig[1]))
+        rx, ry = int(round(rep[0])),  int(round(rep[1]))
+        # 오차 벡터 (노란 선)
+        cv2.line(img_bgr, (ox, oy), (rx, ry), (0, 215, 255), 1, cv2.LINE_AA)
+        # LoFTR 원래 점 (초록 원)
+        cv2.circle(img_bgr, (ox, oy), 5, (0, 220, 0), -1, cv2.LINE_AA)
+        # 재투영 점 (빨강 점)
+        cv2.circle(img_bgr, (rx, ry), 4, (0, 50, 255), -1, cv2.LINE_AA)
+
+    # 범례 텍스트
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(img_bgr, f"Green: LoFTR inlier ({len(pts2d_inlier)}pts)",
+                (12, 30), font, 0.7, (0, 220, 0),   2, cv2.LINE_AA)
+    cv2.putText(img_bgr, "Red  : Reprojected (estimated pose)",
+                (12, 60), font, 0.7, (0, 50, 255),  2, cv2.LINE_AA)
+    cv2.putText(img_bgr, "Yellow: Error vector",
+                (12, 90), font, 0.7, (0, 215, 255), 2, cv2.LINE_AA)
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(output_path, img_bgr)
+    print(f"[재투영] 저장 완료: {output_path}  ({len(pts2d_inlier)}개 inlier)")
 
 
 # ──────────────────────────────────────────────

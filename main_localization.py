@@ -187,10 +187,22 @@ def localize(query_path: str,
         est_center  = -R_est.T @ best_pose["tvec"].flatten()
         all_centers = estimator.get_all_camera_centers()
         inlier_3d   = best_pose["kd_pts_3d"][best_pose["inliers"]]
-        from visualizer import save_result_ply
+        from visualizer import save_result_ply, save_reprojection_png
         save_result_ply(estimator.points3d, all_centers, eval_result,
                         inlier_pts_3d=inlier_3d,
-                        est_camera_center=est_center)
+                        est_camera_center=est_center,
+                        est_R=R_est)
+
+        # 재투영 오차 이미지 저장 (회전 오류 시각적 확인)
+        inlier_2d = best_pose["kd_pts_query"][best_pose["inliers"]]
+        K_query   = best_pose.get("K_query")
+        if K_query is not None:
+            save_reprojection_png(
+                query_path,
+                best_pose["rvec"], best_pose["tvec"], K_query,
+                pts2d_inlier=inlier_2d,
+                pts3d_inlier=inlier_3d,
+            )
 
     # ── 결과 요약 ─────────────────────────────────
     if debug_mode:
