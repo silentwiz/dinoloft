@@ -281,7 +281,8 @@ def print_summary(query_path: str,
                   top_k_results: list[tuple[str, float]],
                   match_results: list[dict],
                   pose_result: dict | None,
-                  eval_result: dict | None = None) -> None:
+                  eval_result: dict | None = None,
+                  unit_to_meter: float | None = None) -> None:
     """터미널에 최종 결과 요약 출력."""
     print("\n" + "=" * 55)
     print("  LOCALIZATION RESULT SUMMARY")
@@ -307,7 +308,11 @@ def print_summary(query_path: str,
     if eval_result is not None:
         print("\n  [평가 (GT 비교)]")
         print(f"    GT 이미지       : {eval_result['gt_name']}")
-        print(f"    위치 오차       : {eval_result['trans_err']:.4f}  (COLMAP world units)")
+        if unit_to_meter is not None:
+            trans_m = eval_result['trans_err'] * unit_to_meter
+            print(f"    위치 오차       : {eval_result['trans_err']:.4f} units × {unit_to_meter:.4f} → {trans_m:.2f} m")
+        else:
+            print(f"    위치 오차       : {eval_result['trans_err']:.4f}  (COLMAP world units)")
         print(f"    회전 오차       : {eval_result['rot_err']:.2f} °")
 
     print("=" * 55 + "\n")
