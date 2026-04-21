@@ -16,6 +16,7 @@ Phase 1: 오프라인 DB 구축 파이프라인
 
 import os
 import pickle
+import struct
 import subprocess
 import torch
 import torchvision.transforms as T
@@ -31,7 +32,22 @@ from colmap_parser import load_colmap_model
 DATASET_PATH = "./dataset"
 OUTPUT_PATH  = "./sfm_output"
 SPARSE_DIR   = os.path.join(OUTPUT_PATH, "sparse")
-RECON_DIR    = os.path.join(SPARSE_DIR, "0")   # COLMAP mapper 기본 출력 서브폴더
+def _best_recon_dir(sparse_dir: str) -> str:
+    """images.bin 기준으로 이미지 수가 가장 많은 reconstruction 폴더 반환."""
+    best, best_count = None, 0
+    for sub in sorted(os.listdir(sparse_dir)):
+        p = os.path.join(sparse_dir, sub, "images.bin")
+        if not os.path.exists(p):
+            continue
+        with open(p, "rb") as f:
+            n = struct.unpack("<Q", f.read(8))[0]
+        if n > best_count:
+            best, best_count = sub, n
+    if best is None:
+        raise FileNotFoundError(f"sparse 폴더에 유효한 reconstruction이 없습니다: {sparse_dir}")
+    return os.path.join(sparse_dir, best)
+
+RECON_DIR    = _best_recon_dir(SPARSE_DIR) if os.path.exists(SPARSE_DIR) else os.path.join(SPARSE_DIR, "0")
 DB_PATH      = os.path.join(OUTPUT_PATH, "database.db")
 PKL_PATH     = os.path.join(OUTPUT_PATH, "sfm_db.pkl")
 DINO_PT_PATH = os.path.join(OUTPUT_PATH, "dino_feats.pt")
